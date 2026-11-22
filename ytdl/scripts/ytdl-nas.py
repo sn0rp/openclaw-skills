@@ -15,6 +15,7 @@ Exit codes:
 import sys
 import os
 import re
+import time
 import subprocess
 import tempfile
 from pathlib import Path
@@ -24,6 +25,41 @@ NAS_HOST = "nas.snorp.dev"
 NAS_SHARE = "Documents"
 NAS_MUSIC_ROOT = "Music"
 YTDLP = "/usr/local/bin/yt-dlp"
+
+# Auto-update: refresh yt-dlp at most once per this interval. YouTube changes
+# its player/extractor often; a stale yt-dlp shows up as intermittent
+# 'HTTP Error 403: Forbidden' on video data that then clears after `yt-dlp -U`.
+# We update on a cadence (not every run) so rapid back-to-back downloads don't
+# each pay the update latency.
+YTDLP_UPDATE_INTERVAL_SEC = 24 * 60 * 60  # 24h
+YTDLP_UPDATE_STAMP = "/tmp/.ytdlp-last-update"
+
+
+def ensure_ytdlp_fresh() -> None:
+    """Run `yt-dlp -U` if we haven't updated within YTDLP_UPDATE_INTERVAL_SEC.
+
+    Best-effort: any failure here is logged to stderr but never aborts the
+    download - a stale-but-working yt-dlp beats refusing to run.
+    """
+    try:
+        last = os.path.getmtime(YTDLP_UPDATE_STAMP)
+    except OSError:
+        last = 0
+    if (time.time() - last) < YTDLP_UPDATE_INTERVAL_SEC:
+        return
+    print("\u25b6 Update:  checking yt-dlp (>24h since last check)...", file=sys.stderr)
+    try:
+        r = subprocess.run([YTDLP, '-U'], capture_output=True, text=True, timeout=120)
+        last_line = (r.stdout.strip().splitlines() or ['(no output)'])[-1]
+        print(f"\u25b6 Update:  {last_line}", file=sys.stderr)
+    except Exception as e:
+        print(f"\u25b6 Update:  skipped (yt-dlp -U failed: {e})", file=sys.stderr)
+    finally:
+        # Stamp regardless of outcome so a failing update doesn't retry every run.
+        try:
+            Path(YTDLP_UPDATE_STAMP).touch()
+        except OSError:
+            pass
 
 
 # ── URL cleaning ──────────────────────────────────────────────────────────────
@@ -49,6 +85,11 @@ _STRIP_PATTERNS = [
     r'\s*\|\s*Official(?:\s+(?:Music\s+)?(?:Video|Audio|MV))?\s*$',
     # " - Official Video" trailing suffix
     r'\s+-\s+Official(?:\s+(?:Music\s+)?(?:Video|Audio|MV))?\s*$',
+    # Trailing bare 'Lyrics' / 'Lyric Video' with a leading / | - separator
+    # e.g. 'Song / Lyrics', 'Song | Lyric Video', 'Song - Lyrics'
+    r'\s*[/|\-]\s*Lyric[s]?(?:\s+Video)?\s*$',
+    # Trailing container/media extension baked into the title (e.g. 'foo.mp4')
+    r'\.(?:mp4|mkv|webm|avi|mov|m4a|flv|mp3|wav|aac|ogg|wmv|3gp)\s*$',
     # Collapse multiple spaces
     r'\s{2,}',
 ]
@@ -65,8 +106,14 @@ def has_artist_separator(title: str) -> bool:
     return bool(re.search(r'.+\s+-\s+.+', title))
 
 def safe_filename(name: str) -> str:
-    """Strip filesystem-unsafe characters."""
-    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name).strip(' .')
+    """Strip filesystem-unsafe characters and smbclient command separators.
+
+    The semicolon is critical: smbclient's -c argument uses ';' as a command
+    separator, so a title like 'Steins;Gate' splits the put line into garbage
+    and the upload fails. Strip it (and other smbclient-hostile chars) here so
+    both the local temp path and the remote path stay clean.
+    """
+    return re.sub(r'[<>:"/\\|?*;\x00-\x1f]', '', name).strip(' .')
 
 
 # ── SMB helpers ───────────────────────────────────────────────────────────────
@@ -111,6 +158,8 @@ def main() -> None:
 
     raw_url = sys.argv[1]
     subdir = sys.argv[2].strip('/') if len(sys.argv) > 2 else None
+
+    ensure_ytdlp_fresh()
 
     url = clean_url(raw_url)
     print(f"▶ URL:     {url}", file=sys.stderr)

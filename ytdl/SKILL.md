@@ -1,35 +1,40 @@
-# ytdl — YouTube → NAS Music Downloader
+---
+name: "ytdl"
+description: "Download YouTube audio as MP3 and deliver to NAS Music share via Discord command."
+---
+
+# ytdl - YouTube → NAS Music Downloader
 
 ## Trigger
 
-Any message that contains a YouTube URL (`youtube.com/watch?v=` or `youtu.be/`) addressed to The Mentor in a Discord channel. Canonical invocation format (from a dedicated `#ytdl` channel):
+Any message that contains a YouTube URL (`youtube.com/watch?v=` or `youtu.be/`) addressed to Elon's Husk in a Discord channel.  Canonical invocation format (from a dedicated `#ytdl` channel):
 
 ```
-@The Mentor <YouTube-URL> [subdirectory]
+@Elon's Husk <YouTube-URL> [subdirectory]
 ```
 
 Examples:
 ```
-@The Mentor https://www.youtube.com/watch?v=E4rhGUfd_c4
-@The Mentor https://www.youtube.com/watch?v=E4rhGUfd_c4&list=PLxxx  charli-xcx
-@The Mentor https://youtu.be/E4rhGUfd_c4 chillwave
+@Elon's Husk https://www.youtube.com/watch?v=E4rhGUfd_c4
+@Elon's Husk https://www.youtube.com/watch?v=E4rhGUfd_c4&list=PLxxx  charli-xcx
+@Elon's Husk https://youtu.be/E4rhGUfd_c4 chillwave
 ```
 
-The subdirectory argument (if given) is placed after the URL, separated by whitespace. It becomes a subdirectory of `Music/` on the NAS.
+The subdirectory argument (if given) is placed after the URL, separated by whitespace.  It becomes a subdirectory of `Music/` on the NAS.
 
 ---
 
 ## Steps
 
-### 1 — Parse message
+### 1 - Parse message
 
 Extract:
-- `URL` — first token matching `https?://(www\.)?youtube\.com/watch\?` or `https?://youtu\.be/`
-- `SUBDIR` — next whitespace-separated token after the URL, if present (ignore `@The Mentor` prefix and any trailing punctuation)
+- `URL`   - first token matching `https?://(www\.)?youtube\.com/watch\?` or `https?://youtu\.be/`
+- `SUBDIR` - next whitespace-separated token after the URL, if present (ignore `@Elon's Husk` prefix and any trailing punctuation)
 
 If no URL is found, reply: "I don't see a YouTube link in there. Give me a URL and I'll grab it."
 
-### 2 — Run the download script
+### 2 - Run the download script
 
 ```bash
 python3 /usr/local/lib/ytdl-nas.py "<URL>" ["<SUBDIR>"]
@@ -37,7 +42,7 @@ python3 /usr/local/lib/ytdl-nas.py "<URL>" ["<SUBDIR>"]
 
 Capture both stdout and stderr.
 
-### 3 — Report
+### 3 - Report
 
 **On SUCCESS** (stdout starts with `SUCCESS:`):
 
@@ -90,7 +95,9 @@ NAS shares: `//nas.snorp.dev/Documents` → `Music/` subdirectory.
 
 ---
 
-## Filename normalisation logic
+## Filename normalisation logic (summary)
+
+Strips filesystem-unsafe AND smbclient-hostile characters: `< > : " / \ | ? * ;` and control chars. The **semicolon** is critical - smbclient's `-c` arg uses `;` as a command separator, so titles like `Steins;Gate` broke the upload until it was added to `safe_filename` (2026-07-10).
 
 Strips (case-insensitive, bracketed or unbracketed):
 - `(Official Video)`, `[Official Music Video]`, `(Official Audio)`, `(Official)`
@@ -104,15 +111,15 @@ Artist detection:
 
 ---
 
-## Re-installing / updating yt-dlp
+## yt-dlp auto-update (built in)
 
-The script does **not** auto-update yt-dlp on every run. To update manually:
+The script **auto-updates yt-dlp on a 24h cadence** (added 2026-08-09). At the start of each run `ensure_ytdlp_fresh()` runs `yt-dlp -U` only if more than 24h have passed since the last check, tracked via the mtime of the stamp file `/tmp/.ytdlp-last-update`. This keeps the extractor current without paying update latency on rapid back-to-back downloads.
 
-```bash
-yt-dlp -U
-```
+Why it matters: a stale yt-dlp manifests as intermittent `HTTP Error 403: Forbidden` on video data that then clears after `yt-dlp -U`. Two-plus back-to-back 403s that succeed on retry = stale extractor. The auto-update now handles this; the manual fallback is still `yt-dlp -U`.
 
-Or reinstall from the GitHub releases URL above. Update when downloads start failing with extraction errors.
+The update step is best-effort: any failure is logged to stderr but never aborts the download, and the stamp is touched regardless of outcome so a failing update doesn't retry every single run. Force an immediate re-check with `rm /tmp/.ytdlp-last-update`.
+
+Or reinstall from the GitHub releases URL above if the binary itself is broken.
 
 ---
 
