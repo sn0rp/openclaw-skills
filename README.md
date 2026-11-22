@@ -1,6 +1,6 @@
 # openclaw-skills
 
-Reusable skill scripts for [The Mentor](https://github.com/sn0rp) — a personal OpenClaw assistant.
+Reusable skill scripts for Elon's Husk, a personal OpenClaw assistant for [sn0rp](https://github.com/sn0rp).
 
 Skills here are invoked from Discord and other channels. Each skill directory contains a `SKILL.md` (procedure instructions) and a `scripts/` directory with the implementation.
 
